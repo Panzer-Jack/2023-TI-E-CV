@@ -11,9 +11,9 @@ sensor.set_pixformat(sensor.GRAYSCALE) # 设置图像色彩格式为RGB565格式
 sensor.set_framesize(sensor.QQVGA)  # 设置图像大小为160*120
 sensor.set_auto_whitebal(False)      # 设置自动白平衡
 sensor.set_brightness(3000)         # 设置亮度为3000
-#sensor.skip_frames(time = 20)       # 跳过帧
+sensor.skip_frames(time = 20)       # 跳过帧
 
-serial = UART(UART.UART2, 115200, 8, 0, 0, timeout=1000, read_buf_len=4096)
+serial = UART(UART.UART2, 9600, 8, timeout=1000, read_buf_len=4096)
 clock = time.clock()
 corner = 0
 
@@ -25,38 +25,40 @@ corner = 0
 # 正确
 #red_threshold = (213, 255) #max min
 #green_threshold = (201, 255) #max min
-
 # 白天
 red_threshold = (185, 255) #max min
 green_threshold = (165, 255) #max min
 
-# 变量
-laser = (100, 63)   # 激光坐标
-road = []           # 基于当前 的 最优化路径
-roadPass = 0        # 已经过的路口数
-roadFlag = [0, 0]        # 下个路口下降上升的状态 + 升 - 降
+
+# 权重
+W = 1.8
+laser = (101, 64)
 
 def serial_write(msg):
-    #time.sleep_ms(200)
+    time.sleep_ms(50)
     print(msg)
     serial.write(msg)
+    msg = serial_read()
+    while not msg:
+        msg = serial_read()
 
 def serial_read():
-    while 1:
-        msg = serial.read()
-        if msg:
-            print("----------")
-            print(msg)
-            print("----------")
-            return msg
+    msg = serial.read()
+    if msg:
+        print("----------")
+        print(msg)
+        print("----------")
+    return msg
 
 def findRect():
     while 1:
+        rec = []
+        for i in range(0, 4):
+            rec.append([0, 0])
         clock.tick()
         img = sensor.snapshot()
-        for r in img.find_rects(threshold = 20000):
+        for r in img.find_rects(threshold = 10000):
             if r.w() > 20 and r.h() > 20:
-
                 img.draw_rectangle(r.rect(), color = (255, 0, 0), scale = 4)
                 corner = r.corners()
                 img.draw_circle(corner[0][0], corner[0][1], 5, color = (0, 0, 255), thickness = 2, fill = False)
@@ -64,61 +66,13 @@ def findRect():
                 img.draw_circle(corner[2][0], corner[2][1], 5, color = (0, 0, 255), thickness = 2, fill = False)
                 img.draw_circle(corner[3][0], corner[3][1], 5, color = (0, 0, 255), thickness = 2, fill = False)
 
-                rec = []
-                for i in range(0, 4):
-                    rec.append([0, 0])
-
                 if r.x() > 0 or r.y()> 0:
-                    maxN = -10000
-                    minN = 99999
-                    for i in range(0, 4):
-                        if(maxN < corner[i][0]):
-                            maxN = corner[i][0]
-                            rec[2] = corner[i]
-                        if(minN > corner[i][0]):
-                            minN = corner[i][0]
-                            rec[0] = corner[i]
-
-                    for i in range(0, 4):
-                        maxN = -10000
-                        minN = 99999
-                        if(maxN < corner[i][1]):
-                            maxN = corner[i][1]
-                            rec[3] = corner[i]
-                        if(minN > corner[i][1]):
-                            minN = corner[i][1]
-                            rec[1] = corner[i]
-
-                    if(rec[0] == rec[1] or rec[0] == rec[3]):
-                        rec[0] = [r.x(), r.y()]
-                        rec[1] = [r.x() + r.w(), r.y()]
-                        rec[2] = [r.x() + r.w(), r.y() + r.h()]
-                        rec[3] = [r.x(), r.y() + r.h()]
-
-                    dm = 99999
-                    tar = 0
-                    road = []
-
-                    print("=======debug3========")
-                    print(int(math.pow(rec[i][0]-laser[0], 2)))
-                    for i in range(0, 4):
-                        d = math.sqrt(int(math.pow(rec[i][0]-laser[0], 2)) + int(math.pow(rec[i][1]-laser[1], 2)))
-                        d = int(d)
-                        if dm > d:
-                            tar = i
-                    i = tar
-                    while i <= 3:
-                        road.append(rec[i])
-                        i += 1
-
-                    i = -1
-                    while i != tar:
-                        i += 1
-                        road.append(rec[i])
-
-                    print("=======debug4========")
-                    print(road)
-                    return road
+                    rec[0] = [r.x() - 1, r.y() - 2]
+                    rec[1] = [r.x() + r.w() - 1, r.y() - 2]
+                    rec[2] = [r.x() + r.w() - 1, r.y() + r.h() - 2]
+                    rec[3] = [r.x() - 1, r.y() + r.h() - 2]
+                    print(rec)
+                    return rec
 
 def findLaser():
     while 1:
@@ -133,160 +87,128 @@ def findLaser():
                 print(laser)
                 return laser
 
-def nextPos(road, begin = 0):
+
+
+def nextLaser(tarX, tarY):
+    i = 0
+    for i in range(0, min(abs(tarX), abs(tarY))):
+        if tarX > 0 and tarY > 0:
+            serial_write('3')
+            serial_write('1')
+        elif tarX < 0 and tarY < 0:
+            serial_write('4')
+            serial_write('2')
+        elif tarX > 0 and tarY < 0:
+            serial_write('3')
+            serial_write('2')
+        else:
+            serial_write('4')
+            serial_write('1')
+    while i < abs(tarX):
+        i += 1
+        if tarX < 0:
+            serial_write('4')
+        else:
+            serial_write('3')
+    while i < abs(tarY):
+        i += 1
+        if tarY < 0:
+            serial_write('2')
+        else:
+            serial_write('1')
+
     rec = findRect()
-
-    if begin:
-        x = road[0][0]
-        y = road[0][1]
-    else:
-        if road[0][0] - laser[0] < roadFlag[0]:
-            x = road[0][0]
-            y = road[0][1]
-        elif road[0][0] - laser[0] > roadFlag[0]:
-            x = road[1][0]
-            y = road[1][1]
-        else:
-            pass
-
-        if road[0][1] - laser[1] < roadFlag[1]:
-            x = road[0][0]
-            y = road[0][1]
-        elif road[0][1] - laser[1] > roadFlag[1]:
-            x = road[1][0]
-            y = road[1][1]
-        else:
-            pass
-
-
-    while abs(laser[0] - x) > 2 and abs(laser[1] - y) > 2:
+    dm = 9999
+    tar = []
+    for i in range(0, 4):
+        d = math.sqrt(abs(math.pow(rec[i][0]-laser[0], 2))+abs(math.pow(rec[i][1]-laser[1], 2)))
+        if dm > d:
+            dm = d
+            tar = rec[i]
+            print("tar: ")
+            print(tar)
+    while abs(laser[0] - tar[0]) > 2:
         rec = findRect()
-
-        if begin:
-            x = road[0][0]
-            y = road[0][1]
-        else:
-            if road[0][0] - laser[0] < roadFlag[0]:
-                x = road[0][0]
-                y = road[0][1]
-            elif road[0][0] - laser[0] > roadFlag[0]:
-                x = road[1][0]
-                y = road[1][1]
-            else:
-                pass
-
-            if road[0][1] - laser[1] < roadFlag[1]:
-                x = road[0][0]
-                y = road[0][1]
-            elif road[0][1] - laser[1] > roadFlag[1]:
-                x = road[1][0]
-                y = road[1][1]
-            else:
-                pass
-
-        if laser[0] > x:
-            serial_write('3')
-        else:
-            serial_write('4')
-        if laser[1] > y:
-            serial_write('1')
-        else:
-            serial_write('2')
-
-        msg = serial_read()
-        while msg != b'9':
-            msg = serial_read()
-            pass
-
-    while abs(laser[0] - x) > 2:
-        rec = findRect()
-
-        if begin:
-            x = road[0][0]
-            y = road[0][1]
-        else:
-            if road[0][0] - laser[0] < roadFlag[0]:
-                x = road[0][0]
-                y = road[0][1]
-            elif road[0][0] - laser[0] > roadFlag[0]:
-                x = road[1][0]
-                y = road[1][1]
-            else:
-                pass
-
-            if road[0][1] - laser[1] < roadFlag[1]:
-                x = road[0][0]
-                y = road[0][1]
-            elif road[0][1] - laser[1] > roadFlag[1]:
-                x = road[1][0]
-                y = road[1][1]
-            else:
-                pass
-
-        if laser[0] > x:
+        dm = 9999
+        tar = []
+        for i in range(0, 4):
+            d = math.sqrt(abs(math.pow(rec[i][0]-laser[0], 2))+abs(math.pow(rec[i][1]-laser[1], 2)))
+            if dm > d:
+                dm = d
+                tar = rec[i]
+                print("tar: ")
+                print(tar)
+        if laser[0] > tar[0]:
             serial_write('3')
         else:
             serial_write('4')
 
-        msg = serial_read()
-        while msg != b'9':
-            msg = serial_read()
-            pass
-
-    while abs(laser[1] - y) > 2:
+    while abs(laser[1] - tar[1]) > 2:
         rec = findRect()
+        dm = 9999
+        tar = []
+        for i in range(0, 4):
+            d = math.sqrt(abs(math.pow(rec[i][0]-laser[0], 2))+abs(math.pow(rec[i][1]-laser[1], 2)))
+            if dm > d:
+                dm = d
+                tar = rec[i]
 
-        if begin:
-            x = road[0][0]
-            y = road[0][1]
-        else:
-            if road[0][0] - laser[0] < roadFlag[0]:
-                x = road[0][0]
-                y = road[0][1]
-            elif road[0][0] - laser[0] > roadFlag[0]:
-                x = road[1][0]
-                y = road[1][1]
-            else:
-                pass
-
-            if road[0][1] - laser[1] < roadFlag[1]:
-                x = road[0][0]
-                y = road[0][1]
-            elif road[0][1] - laser[1] > roadFlag[1]:
-                x = road[1][0]
-                y = road[1][1]
-            else:
-                pass
-
-        if laser[1] > y:
+                print("tar: ")
+                print(tar)
+        if laser[1] > tar[1]:
             serial_write('1')
         else:
             serial_write('2')
 
-        msg = serial_read()
-        while msg != b'9':
-            msg = serial_read()
-            pass
-    return findRect()
-
-
+rec = findRect()
 while(True):
     clock.tick()
-    road = findRect()
 
-    road = nextPos(road)
-    roadFlag = [road[1][0] - road[0][0], road[1][1] - road[0][1]]
-    road = nextPos(road)
-    roadFlag = [road[1][0] - road[0][0], road[1][1] - road[0][1]]
-    road = nextPos(road)
-    roadFlag = [road[1][0] - road[0][0], road[1][1] - road[0][1]]
-    road = nextPos(road)
-    roadFlag = [road[1][0] - road[0][0], road[1][1] - road[0][1]]
-    road = nextPos(road)
+    rec = findRect()
+    print(rec)
+    tarX = int((laser[0] - rec[0][0]) * W)
+    tarY = int((laser[1] - rec[0][1]) * W)
+    print("===========")
+    print(tarX, tarY)
+    print("===========")
+    nextLaser(tarX, tarY)
 
-    #nextPos(0, 1)
+    rec = findRect()
+    print(rec)
+    tarX = int((laser[0] - rec[1][0]) * W)
+    tarY = int((laser[1] - rec[1][1]) * W)
+    print("===========")
+    print(tarX, tarY)
+    print("===========")
+    nextLaser(tarX, tarY)
 
-    #if(flag):
-    #print(tar)
-    #serial.deinit()
-    #del serial
+    rec = findRect()
+    print(rec)
+    tarX = int((laser[0] - rec[2][0]) * W)
+    tarY = int((laser[1] - rec[2][1]) * W)
+    print("===========")
+    print(tarX, tarY)
+    print("===========")
+    nextLaser(tarX, tarY)
+
+
+    rec = findRect()
+    print(rec)
+    tarX = int((laser[0] - rec[3][0]) * W)
+    tarY = int((laser[1] - rec[3][1]) * W)
+    print("===========")
+    print(tarX, tarY)
+    print("===========")
+    nextLaser(tarX, tarY)
+
+    rec = findRect()
+    print(rec)
+    tarX = int((laser[0] - rec[0][0]) * W)
+    tarY = int((laser[1] - rec[0][1]) * W)
+    print("===========")
+    print(tarX, tarY)
+    print("===========")
+    nextLaser(tarX, tarY)
+
+    break
+
